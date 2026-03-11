@@ -42,7 +42,7 @@ app.use(
     cors({
         origin: [
           "http://localhost:5173", // local frontend
-          "https://ai-learning-frontend-4w9l.onrender.com" // deployed frontend
+          "https://learning-assistant-frontend-ufgl.onrender.com" // deployed frontend
         ],
         methods: ["GET", "POST", "PUT", "DELETE"],
         allowedHeaders: ["Content-Type", "Authorization"],
