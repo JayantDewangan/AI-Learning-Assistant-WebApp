@@ -19,6 +19,15 @@ const documentSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    // Store PDF binary in MongoDB to survive Render's ephemeral filesystem
+    fileData: {
+        type: Buffer,
+        default: null
+    },
+    mimeType: {
+        type: String,
+        default: 'application/pdf'
+    },
     fileSize: {
         type: Number,
         required: true

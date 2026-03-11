@@ -3,7 +3,6 @@ import Flashcard from '../models/FlashCard.js';
 import Quiz from '../models/Quiz.js';
 import { extractTextFromPDF } from '../utils/pdfParser.js';
 import { chunkText } from '../utils/textChunker.js';
-import fs from 'fs/promises';
 import mongoose from 'mongoose';
 
 // @desc    Upload PDF document
@@ -23,7 +22,6 @@ export const uploadDocument = async (req, res, next) => {
         const { title } = req.body;
 
         if (!title) {
-            await fs.unlink(req.file.path).catch(()=>{});
             return res.status(400).json({
                 success: false,
                 error: 'Please provide a document title',
@@ -31,49 +29,44 @@ export const uploadDocument = async (req, res, next) => {
             });
         }
 
-        // Production-safe base URL
-        const baseURL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 8000}`;
-
-        const fileURL = `${baseURL}/uploads/documents/${req.file.filename}`;
-
-        // Create document record
+        // Create document record — store buffer in MongoDB (no disk write needed)
         const document = await Document.create({
             userId: req.user._id,
             title,
-            fileName: req.file.filename, // IMPORTANT: use filename not originalname
-            filePath: fileURL,
+            fileName: req.file.originalname,
+            filePath: `/api/documents/placeholder`, // placeholder; actual serving via /api/documents/:id/file
             fileSize: req.file.size,
+            mimeType: req.file.mimetype,
+            fileData: req.file.buffer, // Store PDF binary in MongoDB
             status: 'processing'
         });
 
-        // Process PDF in background
-        processPDF(document._id, req.file.path).catch(err => {
+        // Process PDF in background using the buffer directly
+        processPDF(document._id, req.file.buffer).catch(err => {
             console.error('PDF processing error:', err);
         });
 
+        // Return document without fileData for a lighter response
+        const responseDoc = document.toObject();
+        delete responseDoc.fileData;
+
         res.status(201).json({
             success: true,
-            data: document,
+            data: responseDoc,
             message: 'Document uploaded successfully. Processing in progress...'
         });
 
     } catch (error) {
-
-        // Clean uploaded file if error occurs
-        if (req.file) {
-            await fs.unlink(req.file.path).catch(()=>{});
-        }
-
         next(error);
     }
 };
 
 
-// Helper function to process PDF
-const processPDF = async (documentId, filePath) => {
+// Helper function to process PDF — accepts a Buffer
+const processPDF = async (documentId, fileBuffer) => {
     try {
 
-        const { text } = await extractTextFromPDF(filePath);
+        const { text } = await extractTextFromPDF(fileBuffer);
 
         const chunks = chunkText(text, 500, 50);
 
@@ -133,6 +126,7 @@ export const getDocuments = async (req, res, next) => {
         $project: {
           extractedText: 0,
           chunks: 0,
+          fileData: 0,   // Exclude binary data from list
           flashcardSets: 0,
           quizSets: 0
         }
@@ -165,7 +159,7 @@ export const getDocument = async (req, res, next) => {
         const document = await Document.findOne({
             _id: req.params.id,
             userId: req.user._id
-        });
+        }).select('-fileData'); // exclude binary data
 
         if (!document) {
             return res.status(404).json({
@@ -203,6 +197,47 @@ export const getDocument = async (req, res, next) => {
 };
 
 
+// @desc    Serve PDF file from MongoDB
+// @route   GET /api/documents/:id/file
+// @access  Private
+export const serveDocumentFile = async (req, res, next) => {
+    try {
+        const document = await Document.findOne({
+            _id: req.params.id,
+            userId: req.user._id
+        }).select('fileData mimeType fileName status');
+
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                error: 'Document not found',
+                statusCode: 404
+            });
+        }
+
+        if (!document.fileData) {
+            return res.status(404).json({
+                success: false,
+                error: 'File data not available. Please re-upload the document.',
+                statusCode: 404
+            });
+        }
+
+        res.set({
+            'Content-Type': document.mimeType || 'application/pdf',
+            'Content-Length': document.fileData.length,
+            'Content-Disposition': `inline; filename="${document.fileName}"`,
+            'Cache-Control': 'private, max-age=3600'
+        });
+
+        res.send(document.fileData);
+
+    } catch (error) {
+        next(error);
+    }
+};
+
+
 // @desc    Delete document
 // @route   DELETE /api/documents/:id
 // @access  Private
@@ -223,9 +258,7 @@ export const deleteDocument = async (req, res, next) => {
             });
         }
 
-        // Delete file from disk
-        await fs.unlink(`uploads/documents/${document.fileName}`).catch(()=>{});
-
+        // No local file to delete (stored in MongoDB)
         await document.deleteOne();
 
         res.status(200).json({
@@ -237,3 +270,5 @@ export const deleteDocument = async (req, res, next) => {
         next(error);
     }
 };
+
+

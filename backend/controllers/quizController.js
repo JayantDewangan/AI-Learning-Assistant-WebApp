@@ -1,5 +1,16 @@
 import Quiz from "../models/Quiz.js";
 
+export const getAllQuizzes = async (req, res, next) => {
+    try {
+        const quizzes = await Quiz.find({ userId: req.user._id })
+            .populate('documentId', 'title')
+            .sort({ createdAt: -1 });
+        res.status(200).json({ success: true, count: quizzes.length, data: quizzes });
+    } catch (error) {
+        next(error);
+    }
+};
+
 export const getQuizzes = async (req, res, next) => {
     try {
         const quizzes = await Quiz.find({
@@ -62,17 +73,11 @@ export const submitQuiz = async (req, res, next) => {
         (a) => a.questionId === question._id.toString()
       );
 
-      const selectedAnswer = userAnswer?.selectedAnswer?.trim() || '';
-      let correctAnswer = question.correctAnswer?.trim() || '';
+      // correctAnswer is now always stored as plain option text (normalized at generation time)
+      const selectedAnswer = (userAnswer?.selectedAnswer || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const correctAnswer = (question.correctAnswer || '').toLowerCase().replace(/\s+/g, ' ').trim();
       
-      if (correctAnswer.match(/^[Oo]\d+$/)) {
-        const optionNum = parseInt(correctAnswer.substring(1)) - 1;
-        if (optionNum >= 0 && optionNum < question.options.length) {
-          correctAnswer = question.options[optionNum];
-        }
-      }
-      
-      const isCorrect = selectedAnswer.toLowerCase() === correctAnswer.toLowerCase();
+      const isCorrect = selectedAnswer !== '' && selectedAnswer === correctAnswer;
 
       if (isCorrect) {
         correctCount++;
@@ -82,7 +87,7 @@ export const submitQuiz = async (req, res, next) => {
         questionId: question._id,
         question: question.question,
         selectedAnswer: userAnswer?.selectedAnswer || null,
-        correctAnswer,
+        correctAnswer: question.correctAnswer, // return original casing in response
         isCorrect,
         explanation: question.explanation,
         });
@@ -106,17 +111,9 @@ export const submitQuiz = async (req, res, next) => {
         };
       }
 
-      const selectedAnswer = userAnswer.selectedAnswer?.trim() || '';
-      let correctAnswer = question.correctAnswer?.trim() || '';
-      
-      if (correctAnswer.match(/^[Oo]\d+$/)) {
-        const optionNum = parseInt(correctAnswer.substring(1)) - 1;
-        if (optionNum >= 0 && optionNum < question.options.length) {
-          correctAnswer = question.options[optionNum];
-        }
-      }
-      
-      const isCorrect = selectedAnswer.toLowerCase() === correctAnswer.toLowerCase();
+      const selectedAnswer = (userAnswer.selectedAnswer || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const correctAnswer = (question.correctAnswer || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const isCorrect = selectedAnswer !== '' && selectedAnswer === correctAnswer;
       
       return {
         questionIndex: index,
@@ -169,20 +166,12 @@ export const getQuizResults = async (req, res, next) => {
         const detailedResults = quiz.questions.map((question, index) => {
             const userAnswer = quiz.userAnswers.find(a => a.questionIndex === index);
 
-            // ✅ Resolve O1/O2 format to actual option text
-            let correctAnswer = question.correctAnswer?.trim() || '';
-            if (correctAnswer.match(/^[Oo]\d+$/)) {
-                const optionNum = parseInt(correctAnswer.substring(1)) - 1;
-                if (optionNum >= 0 && optionNum < question.options.length) {
-                    correctAnswer = question.options[optionNum];
-                }
-            }
-
+            // correctAnswer is always stored as plain text (normalized at generation time)
             return {
                 questionIndex: index,
                 question: question.question,
                 options: question.options,
-                correctAnswer,  // ✅ Always resolved to full text
+                correctAnswer: question.correctAnswer,
                 selectedAnswer: userAnswer?.selectedAnswer || null,
                 isCorrect: userAnswer?.isCorrect || false,
                 explanation: question.explanation
@@ -227,6 +216,116 @@ export const deleteQuiz = async (req, res, next) => {
         res.status(200).json({
             success: true,
             message: 'Quiz deleted successfully'
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// Toggle public sharing
+export const toggleShareQuiz = async (req, res, next) => {
+    try {
+        const quiz = await Quiz.findOne({
+            _id: req.params.id,
+            userId: req.user._id
+        });
+
+        if (!quiz) {
+            return res.status(404).json({ success: false, error: 'Quiz not found' });
+        }
+
+        quiz.isPublic = !quiz.isPublic;
+        await quiz.save();
+
+        res.status(200).json({
+            success: true,
+            data: { isPublic: quiz.isPublic }
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// Get public quiz (without correct answers)
+export const getPublicQuizById = async (req, res, next) => {
+    try {
+        const quiz = await Quiz.findOne({
+            _id: req.params.id,
+            isPublic: true
+        }).populate('documentId', 'title');
+
+        if (!quiz) {
+            return res.status(404).json({ success: false, error: 'Public quiz not found' });
+        }
+
+        // Strip out correct answers and explanations for the public view
+        const publicQuestions = quiz.questions.map(q => ({
+            _id: q._id,
+            question: q.question,
+            options: q.options,
+            difficulty: q.difficulty
+        }));
+
+        res.status(200).json({
+            success: true,
+            data: {
+                _id: quiz._id,
+                title: quiz.title,
+                documentId: quiz.documentId,
+                totalQuestions: quiz.totalQuestions,
+                questions: publicQuestions
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// Submit public quiz (grade but don't save to DB)
+export const submitPublicQuiz = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { answers } = req.body;
+
+        const quiz = await Quiz.findOne({ _id: id, isPublic: true });
+
+        if (!quiz) {
+            return res.status(404).json({ success: false, error: 'Public quiz not found' });
+        }
+
+        let correctCount = 0;
+        const detailedResults = [];
+
+        quiz.questions.forEach((question) => {
+            const userAnswer = answers.find(a => a.questionId === question._id.toString());
+            
+            const selectedAnswer = (userAnswer?.selectedAnswer || '').toLowerCase().replace(/\s+/g, ' ').trim();
+            const correctAnswer = (question.correctAnswer || '').toLowerCase().replace(/\s+/g, ' ').trim();
+            
+            const isCorrect = selectedAnswer !== '' && selectedAnswer === correctAnswer;
+
+            if (isCorrect) correctCount++;
+
+            detailedResults.push({
+                questionId: question._id,
+                question: question.question,
+                selectedAnswer: userAnswer?.selectedAnswer || null,
+                correctAnswer: question.correctAnswer,
+                isCorrect,
+                explanation: question.explanation,
+            });
+        });
+
+        const score = Math.round((correctCount / quiz.questions.length) * 100);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                score,
+                correctAnswers: correctCount,
+                totalQuestions: quiz.questions.length,
+                detailedResults,
+            },
         });
     } catch (error) {
         next(error);

@@ -4,6 +4,7 @@ import documentService from '../../services/documentService';
 import flashcardService from '../../services/flashCardService';
 import aiService from '../../services/aiService';
 import toast from 'react-hot-toast';
+import { BASE_URL } from '../../utils/apiPath';
 import {
   ArrowLeft,
   ExternalLink,
@@ -54,13 +55,41 @@ const DocumentDetailPage = () => {
   const [generatingQuiz, setGeneratingQuiz] = useState(false);
   const [showQuizModal, setShowQuizModal] = useState(false);
   const [quizQuestionCount, setQuizQuestionCount] = useState(5);
+  const [quizDifficulty, setQuizDifficulty] = useState('medium');
   const [deleteQuizId, setDeleteQuizId] = useState(null);
   const [deletingQuiz, setDeletingQuiz] = useState(false);
+
+  // PDF blob URL — fetches binary from authenticated API so it persists across Render restarts
+  const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   useEffect(() => { fetchDocument(); }, [id]);
   useEffect(() => { if (activeTab === 'flashcards') fetchFlashcardSets(); }, [activeTab]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
   useEffect(() => { if (activeTab === 'quizzes') fetchQuizzes(); }, [activeTab]);
+
+  // Fetch PDF as blob when document is ready (authenticated endpoint — survives Render restarts)
+  useEffect(() => {
+    if (!document || document.status !== 'ready' || !id) return;
+    let objectUrl;
+    setPdfLoading(true);
+    const token = localStorage.getItem('token');
+    fetch(`${BASE_URL}/api/documents/${id}/file`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('PDF fetch failed');
+        return res.blob();
+      })
+      .then(blob => {
+        objectUrl = URL.createObjectURL(blob);
+        setPdfBlobUrl(objectUrl);
+      })
+      .catch(() => setPdfBlobUrl(null))
+      .finally(() => setPdfLoading(false));
+
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [document?._id, document?.status]);
 
   const fetchDocument = async () => {
     try {
@@ -185,7 +214,7 @@ const DocumentDetailPage = () => {
     setShowQuizModal(false);
     const t = toast.loading('Generating quiz...');
     try {
-      await aiService.generateQuiz(id, { numQuestions: quizQuestionCount });
+      await aiService.generateQuiz(id, { numQuestions: quizQuestionCount, difficulty: quizDifficulty });
       toast.success('Quiz generated!', { id: t });
       await fetchQuizzes();
     } catch (error) {
@@ -278,17 +307,32 @@ const DocumentDetailPage = () => {
           <div className="h-full flex flex-col overflow-hidden">
             <div className="shrink-0 bg-white border-b border-slate-200 px-4 sm:px-6 py-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-700">Document Viewer</h2>
-              <a href={document.filePath} target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-700 font-medium transition-colors"
-              >
-                <ExternalLink className="w-4 h-4" />
-                <span className="hidden sm:inline">Open in new tab</span>
-                <span className="sm:hidden">Open</span>
-              </a>
+              {pdfBlobUrl && (
+                <a href={pdfBlobUrl} download={document.fileName || 'document.pdf'}
+                  className="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-700 font-medium transition-colors"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span className="hidden sm:inline">Open in new tab</span>
+                  <span className="sm:hidden">Open</span>
+                </a>
+              )}
             </div>
             <div className="flex-1 bg-slate-100 overflow-hidden">
               {document.status === 'ready' ? (
-                <iframe src={document.filePath} className="w-full h-full border-0" title={document.title} />
+                pdfLoading ? (
+                  <div className="flex flex-col items-center justify-center h-full px-4">
+                    <div className="w-12 h-12 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mb-4" />
+                    <p className="text-slate-600 font-medium text-center">Loading PDF...</p>
+                  </div>
+                ) : pdfBlobUrl ? (
+                  <iframe src={pdfBlobUrl} className="w-full h-full border-0" title={document.title} />
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full px-4">
+                    <FileText className="w-16 h-16 text-slate-300 mb-4" />
+                    <p className="text-slate-600 font-medium text-center">Could not load PDF preview</p>
+                    <p className="text-slate-400 text-sm mt-1 text-center">The document text is still available for AI features</p>
+                  </div>
+                )
               ) : document.status === 'processing' ? (
                 <div className="flex flex-col items-center justify-center h-full px-4">
                   <div className="w-12 h-12 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mb-4" />
@@ -688,13 +732,30 @@ const DocumentDetailPage = () => {
                 <X className="w-5 h-5 text-slate-500" />
               </button>
             </div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">Number of Questions</label>
-            <input
-              type="number" min={3} max={20}
-              value={quizQuestionCount}
-              onChange={(e) => setQuizQuestionCount(Number(e.target.value))}
-              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-slate-900 mb-6"
-            />
+            
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Number of Questions</label>
+              <input
+                type="number" min={3} max={20}
+                value={quizQuestionCount}
+                onChange={(e) => setQuizQuestionCount(Number(e.target.value))}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-slate-900"
+              />
+            </div>
+            
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Difficulty</label>
+              <select
+                value={quizDifficulty}
+                onChange={(e) => setQuizDifficulty(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-slate-900"
+              >
+                <option value="easy">Easy (Definitions & Basics)</option>
+                <option value="medium">Medium (Application & Understanding)</option>
+                <option value="hard">Hard (Analysis & Deep Knowledge)</option>
+              </select>
+            </div>
+
             <div className="flex items-center justify-end gap-3">
               <button onClick={() => setShowQuizModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors">
                 Cancel

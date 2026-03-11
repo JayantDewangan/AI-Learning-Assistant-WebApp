@@ -11,6 +11,9 @@ import FlashCardsListPage from './pages/Flashcards/FlashcardsListPage'
 import FlashcardPage from './pages/Flashcards/FlashcardPage'
 import QuizTakePage from './pages/Quizzes/QuizTakePage'
 import QuizResultPage from './pages/Quizzes/QuizResultPage'
+import QuizzesListPage from './pages/Quizzes/QuizzesListPage'
+import PublicQuizTakePage from './pages/Quizzes/PublicQuizTakePage';
+import PublicQuizResultPage from './pages/Quizzes/PublicQuizResultPage';
 import ProfilePage from './pages/Profile/ProfilePage'
 import { useAuth } from './context/AuthContext';
 
@@ -41,6 +44,16 @@ const App = () => {
           element = {<RegisterPage/>}
         />
 
+        {/* Public Quiz Routes (Unauthenticated) */}
+        <Route 
+          path='/public/quizzes/:quizId' 
+          element={<PublicQuizTakePage/>} 
+        />
+        <Route 
+          path='/public/quizzes/:quizId/results' 
+          element={<PublicQuizResultPage/>} 
+        />
+
         {/* Protected Routes :  */}
         <Route element={<ProtectedRoutes/>}>
           <Route path='/dashboard' element={<DashboardPage/>}/>
@@ -48,6 +61,7 @@ const App = () => {
           <Route path='/documents/:id' element={<DocumentDetailPage/>}/>
           <Route path='/flashcards' element={<FlashCardsListPage/>}/>
           <Route path='/documents/:id/flashcards' element={<FlashcardPage/>}/>
+          <Route path='/quizzes' element={<QuizzesListPage/>}/>
           <Route path='/quizzes/:quizId' element={<QuizTakePage/>}/>
           <Route path='/quizzes/:quizId/results' element={<QuizResultPage/>}/>
           <Route path='profile' element={<ProfilePage/>}/>

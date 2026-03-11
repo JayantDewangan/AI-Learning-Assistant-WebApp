@@ -49,7 +49,7 @@ export const generateFlashcards = async (req, res, next) => {
 
 export const generateQuiz = async (req, res, next) => {
     try {
-        const { documentId, numQuestions = 5, title } = req.body;
+        const { documentId, numQuestions = 5, title, difficulty = 'medium' } = req.body;
 
         if (!documentId) {
             return res.status(400).json({ success: false, error: 'Please provide documentId', statusCode: 400 });
@@ -64,8 +64,8 @@ export const generateQuiz = async (req, res, next) => {
         if (!document) {
             return res.status(404).json({ success: false, error: 'Document not found or not ready', statusCode: 404 });
         }
-
-        const questions = await geminiService.generateQuiz(document.extractedText, parseInt(numQuestions));
+        // Pass difficulty to the AI layer
+        const questions = await geminiService.generateQuiz(document.extractedText, parseInt(numQuestions), difficulty);
 
         const quiz = await Quiz.create({
             userId: req.user._id,

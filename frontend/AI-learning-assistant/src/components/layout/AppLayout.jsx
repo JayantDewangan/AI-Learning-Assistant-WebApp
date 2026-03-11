@@ -29,6 +29,7 @@ const AppLayout = () => {
     { label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
     { label: 'Documents', icon: FileText, path: '/documents' },
     { label: 'Flashcards', icon: BookOpen, path: '/flashcards' },
+    { label: 'Quizzes', icon: BrainCircuit, path: '/quizzes' },
     { label: 'Profile', icon: User, path: '/profile' },
   ];
 

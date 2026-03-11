@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import progressService from '../../services/progressService';
+import quizService from '../../services/quizService';
 import toast from 'react-hot-toast';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+} from 'recharts';
 import {
   FileText,
   BookOpen,
@@ -12,6 +16,7 @@ import {
 
 const DashboardPage = () => {
   const [dashboardData, setDashboardData] = useState(null);
+  const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -21,9 +26,31 @@ const DashboardPage = () => {
 
   const fetchDashboardData = async () => {
     try {
-      const data = await progressService.getDashboardData();
-      console.log('Dashboard API Response:', data);  // Debug
-      setDashboardData(data?.data || data);
+      const [dashRes, quizzesRes] = await Promise.all([
+        progressService.getDashboardData(),
+        quizService.getAllQuizzes()
+      ]);
+      
+      const data = dashRes?.data || dashRes;
+      setDashboardData(data);
+
+      // Process quiz data for charts
+      const allQuizzes = quizzesRes?.data || quizzesRes || [];
+      
+      // Sort quizzes chronologically (oldest to newest) to show progress over time
+      const sortedQuizzes = [...allQuizzes]
+        .filter(q => q.completedAt) // Only show completed quizzes
+        .sort((a, b) => new Date(a.completedAt) - new Date(b.completedAt))
+        .slice(-10); // Take the last 10 quizzes
+
+      const formattedChartData = sortedQuizzes.map((quiz, index) => ({
+        name: `Quiz ${index + 1}`,
+        score: quiz.score || 0,
+        date: new Date(quiz.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        title: quiz.title || 'Untitled Quiz'
+      }));
+
+      setChartData(formattedChartData);
     } catch (error) {
       toast.error('Failed to load dashboard data');
     } finally {
@@ -37,18 +64,21 @@ const DashboardPage = () => {
       value: dashboardData?.overview?.totalDocuments ?? 0,
       icon: FileText,
       iconBg: 'bg-sky-500',
+      path: '/documents',
     },
     {
       label: 'FLASHCARD SETS',
       value: dashboardData?.overview?.totalFlashcardSets ?? 0,
       icon: BookOpen,
       iconBg: 'bg-pink-500',
+      path: '/flashcards',
     },
     {
       label: 'TOTAL QUIZZES',
       value: dashboardData?.overview?.totalQuizzes ?? 0,
       icon: BrainCircuit,
       iconBg: 'bg-indigo-500',
+      path: '/quizzes',
     },
   ];
 
@@ -74,7 +104,8 @@ const DashboardPage = () => {
         {statCards.map((card) => (
           <div
             key={card.label}
-            className="bg-white rounded-2xl border border-slate-200 p-6 flex items-center justify-between shadow-sm"
+            onClick={() => navigate(card.path)}
+            className="bg-white rounded-2xl border border-slate-200 p-6 flex items-center justify-between shadow-sm cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all"
           >
             <div>
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
@@ -87,6 +118,57 @@ const DashboardPage = () => {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Quiz Performance Chart */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+        <div className="mb-6">
+          <h2 className="text-lg font-bold text-slate-800">Recent Quiz Performance</h2>
+          <p className="text-slate-500 text-sm">Your scores across the last 10 completed quizzes</p>
+        </div>
+        
+        {chartData.length > 0 ? (
+          <div className="h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                <XAxis 
+                  dataKey="date" 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fill: '#64748b', fontSize: 12 }} 
+                  dy={10}
+                />
+                <YAxis 
+                  domain={[0, 100]} 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fill: '#64748b', fontSize: 12 }}
+                  dx={-10}
+                />
+                <Tooltip
+                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  labelStyle={{ fontWeight: 'bold', color: '#1e293b', marginBottom: '4px' }}
+                  formatter={(value) => [`${value}%`, 'Score']}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="score" 
+                  stroke="#6366f1" 
+                  strokeWidth={3}
+                  dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }}
+                  activeDot={{ r: 6, strokeWidth: 0 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div className="h-72 w-full flex flex-col items-center justify-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
+            <BrainCircuit className="w-10 h-10 text-slate-300 mb-3" />
+            <p className="text-slate-500 font-medium">No quiz data available yet</p>
+            <p className="text-slate-400 text-sm mt-1">Complete some quizzes to see your progress chart!</p>
+          </div>
+        )}
       </div>
 
       {/* Recent Activity */}
